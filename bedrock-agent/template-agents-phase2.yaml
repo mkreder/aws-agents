@@ -1,0 +1,253 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: HR AI Agent - Multi-Agent Collaboration with Amazon Bedrock Agents (Phase 2)
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    Description: Environment name (dev, test, prod)
+
+Resources:
+  # Lambda function for configuring agent collaborators
+  ConfigureCollaboratorsFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-configure-collaborators-${Environment}"
+      Handler: index.handler
+      Runtime: python3.11
+      Timeout: 300
+      Role: !GetAtt ConfigureCollaboratorsFunctionRole.Arn
+      Code:
+        ZipFile: |
+          import boto3
+          import cfnresponse
+          import time
+          import os
+          import logging
+          import json
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          def handler(event, context):
+              logger.info(f"Received event: {json.dumps(event)}")
+              
+              # Initialize response data
+              response_data = {}
+              
+              try:
+                  # Skip if this is not a Create or Update operation
+                  if event['RequestType'] not in ['Create', 'Update']:
+                      logger.info(f"Request type is {event['RequestType']}, sending success response")
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, response_data)
+                      return
+                  
+                  # Get parameters from the event
+                  props = event['ResourceProperties']
+                  supervisor_agent_id = props['SupervisorAgentId']
+                  region = props['Region']
+                  account_id = props['AccountId']
+                  
+                  # Get agent IDs and alias IDs
+                  resume_parser_agent_id = props['ResumeParserAgentId']
+                  job_analyzer_agent_id = props['JobAnalyzerAgentId']
+                  resume_evaluator_agent_id = props['ResumeEvaluatorAgentId']
+                  gap_identifier_agent_id = props['GapIdentifierAgentId']
+                  candidate_rater_agent_id = props['CandidateRaterAgentId']
+                  interview_notes_agent_id = props['InterviewNotesAgentId']
+                  
+                  resume_parser_agent_alias_id = props['ResumeParserAgentAliasId']
+                  job_analyzer_agent_alias_id = props['JobAnalyzerAgentAliasId']
+                  resume_evaluator_agent_alias_id = props['ResumeEvaluatorAgentAliasId']
+                  gap_identifier_agent_alias_id = props['GapIdentifierAgentAliasId']
+                  candidate_rater_agent_alias_id = props['CandidateRaterAgentAliasId']
+                  interview_notes_agent_alias_id = props['InterviewNotesAgentAliasId']
+                  
+                  # Initialize Bedrock Agent client
+                  bedrock_agent = boto3.client('bedrock-agent', region_name=region)
+                  
+                  # First, update the agent to enable collaboration
+                  logger.info(f"Updating agent {supervisor_agent_id} to enable collaboration")
+                  bedrock_agent.update_agent(
+                      agentId=supervisor_agent_id,
+                      agentName=f"{event['StackId'].split('/')[-2]}-supervisor-{props['Environment']}",
+                      agentResourceRoleArn=props['AgentResourceRoleArn'],
+                      foundationModel=props['FoundationModel'],
+                      agentCollaboration='SUPERVISOR_ROUTER'
+                  )
+                  
+                  # Wait for the agent to be updated
+                  logger.info("Waiting for agent to be updated...")
+                  time.sleep(10)
+                  
+                  # Define the collaborators
+                  collaborators = [
+                      {
+                          'agentId': resume_parser_agent_id,
+                          'agentAliasId': resume_parser_agent_alias_id,
+                          'name': 'resume_parser',
+                          'instruction': "Agent specializes in parsing resumes and extracting key information including personal details, work experience, education, skills, and projects."
+                      },
+                      {
+                          'agentId': job_analyzer_agent_id,
+                          'agentAliasId': job_analyzer_agent_alias_id,
+                          'name': 'job_analyzer',
+                          'instruction': "Agent analyzes job descriptions to understand requirements, qualifications, technical skills needed, and company culture."
+                      },
+                      {
+                          'agentId': resume_evaluator_agent_id,
+                          'agentAliasId': resume_evaluator_agent_alias_id,
+                          'name': 'resume_evaluator',
+                          'instruction': "Agent evaluates candidate resumes against job requirements, assessing skills match, experience relevance, and overall fit."
+                      },
+                      {
+                          'agentId': gap_identifier_agent_id,
+                          'agentAliasId': gap_identifier_agent_alias_id,
+                          'name': 'gap_identifier',
+                          'instruction': "Agent identifies gaps, inconsistencies, and missing information in resumes or candidate profiles."
+                      },
+                      {
+                          'agentId': candidate_rater_agent_id,
+                          'agentAliasId': candidate_rater_agent_alias_id,
+                          'name': 'candidate_rater',
+                          'instruction': "Agent rates candidates on a 1-5 scale based on preset criteria and provides detailed justification."
+                      },
+                      {
+                          'agentId': interview_notes_agent_id,
+                          'agentAliasId': interview_notes_agent_alias_id,
+                          'name': 'interview_notes',
+                          'instruction': "Agent generates interview preparation materials including technical questions, experience-based questions, and areas to probe."
+                      }
+                  ]
+                  
+                  # Add each collaborator
+                  for collab in collaborators:
+                      logger.info(f"Adding collaborator {collab['name']} to agent {supervisor_agent_id}")
+                      try:
+                          bedrock_agent.associate_agent_collaborator(
+                              agentId=supervisor_agent_id,
+                              agentVersion='DRAFT',
+                              collaboratorName=collab['name'],
+                              collaborationInstruction=collab['instruction'],
+                              relayConversationHistory='DISABLED',
+                              agentDescriptor={
+                                  'aliasArn': f"arn:aws:bedrock:{region}:{account_id}:agent-alias/{collab['agentId']}/{collab['agentAliasId']}"
+                              }
+                          )
+                          # Wait a bit between each association to avoid rate limiting
+                          time.sleep(2)
+                      except Exception as e:
+                          logger.error(f"Error associating collaborator {collab['name']}: {str(e)}")
+                          # Continue with other collaborators even if one fails
+                  
+                  # Prepare the agent to create a new version
+                  logger.info(f"Preparing agent {supervisor_agent_id}")
+                  bedrock_agent.prepare_agent(
+                      agentId=supervisor_agent_id
+                  )
+                  
+                  # Wait for the agent to be prepared
+                  logger.info("Waiting for agent to be prepared...")
+                  max_retries = 30
+                  retries = 0
+                  
+                  while retries < max_retries:
+                      try:
+                          response = bedrock_agent.get_agent(agentId=supervisor_agent_id)
+                          status = response['agent']['agentStatus']
+                          logger.info(f"Agent status: {status}")
+                          
+                          if status == 'PREPARED':
+                              logger.info("Agent is prepared")
+                              break
+                          elif status in ['FAILED', 'FAILED_CREATION']:
+                              logger.error(f"Agent preparation failed with status: {status}")
+                              raise Exception(f"Agent preparation failed with status: {status}")
+                          
+                          time.sleep(10)
+                          retries += 1
+                      except Exception as e:
+                          if 'agentStatus' in str(e):
+                              logger.error(f"Error checking agent status: {str(e)}")
+                              time.sleep(10)
+                              retries += 1
+                          else:
+                              raise e
+                  
+                  if retries >= max_retries:
+                      logger.error("Timed out waiting for agent to be prepared")
+                      raise Exception("Timed out waiting for agent to be prepared")
+                  
+                  # Send success response
+                  logger.info("Successfully configured agent collaborators")
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, response_data)
+                  
+              except Exception as e:
+                  logger.error(f"Error: {str(e)}")
+                  cfnresponse.send(event, context, cfnresponse.FAILED, response_data, reason=str(e))
+
+  ConfigureCollaboratorsFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: BedrockAgentAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:*
+                  - bedrock-agent:*
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - iam:PassRole
+                Resource: 
+                  - Fn::ImportValue: !Sub "bedrock-agent-agent-role-arn"
+
+  # Custom resource to configure agent collaborators
+  AgentCollaboratorsConfiguration:
+    Type: Custom::AgentCollaborators
+    Properties:
+      ServiceToken: !GetAtt ConfigureCollaboratorsFunction.Arn
+      SupervisorAgentId: 
+        Fn::ImportValue: !Sub "bedrock-agent-supervisor-agent-id"
+      ResumeParserAgentId:
+        Fn::ImportValue: !Sub "bedrock-agent-resume-parser-agent-id"
+      JobAnalyzerAgentId:
+        Fn::ImportValue: !Sub "bedrock-agent-job-analyzer-agent-id"
+      ResumeEvaluatorAgentId:
+        Fn::ImportValue: !Sub "bedrock-agent-resume-evaluator-agent-id"
+      GapIdentifierAgentId:
+        Fn::ImportValue: !Sub "bedrock-agent-gap-identifier-agent-id"
+      CandidateRaterAgentId:
+        Fn::ImportValue: !Sub "bedrock-agent-candidate-rater-agent-id"
+      InterviewNotesAgentId:
+        Fn::ImportValue: !Sub "bedrock-agent-interview-notes-agent-id"
+      ResumeParserAgentAliasId: "dev-alias"
+      JobAnalyzerAgentAliasId: "dev-alias"
+      ResumeEvaluatorAgentAliasId: "dev-alias"
+      GapIdentifierAgentAliasId: "dev-alias"
+      CandidateRaterAgentAliasId: "dev-alias"
+      InterviewNotesAgentAliasId: "dev-alias"
+      Region: !Ref AWS::Region
+      AccountId: !Ref AWS::AccountId
+      Environment: !Ref Environment
+      AgentResourceRoleArn:
+        Fn::ImportValue: !Sub "bedrock-agent-agent-role-arn"
+      FoundationModel: "amazon.nova-pro-v1:0"
+
+Outputs:
+  CollaboratorsConfigured:
+    Description: Indicates that agent collaborators have been configured
+    Value: !Ref AgentCollaboratorsConfiguration

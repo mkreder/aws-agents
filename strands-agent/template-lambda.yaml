@@ -1,0 +1,192 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Strands Multi-Agent HR Resume Evaluation System - Lambda Phase
+  
+  This template creates the Lambda function and connects it to the infrastructure.
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    Description: Environment name (dev, staging, prod)
+  
+  ModelId:
+    Type: String
+    Default: us.anthropic.claude-3-7-sonnet-20250219-v1:0
+    Description: Bedrock model ID for Strands agents (Claude 3.7 Sonnet)
+
+  InfrastructureStackName:
+    Type: String
+    Default: strands-agent-infrastructure
+    Description: Name of the infrastructure stack
+
+Globals:
+  Function:
+    Timeout: 900
+    MemorySize: 1024
+    Runtime: python3.11
+    Environment:
+      Variables:
+        ENVIRONMENT: !Ref Environment
+        MODEL_ID: !Ref ModelId
+
+Resources:
+  # Lambda Layer for Strands SDK dependencies
+  # Lambda Layer for Strands SDK dependencies
+  StrandsDependenciesLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: !Sub strands-dependencies-${Environment}
+      Description: Strands SDK and dependencies for Lambda
+      ContentUri: packaging/dependencies.zip
+      CompatibleRuntimes:
+        - python3.11
+      CompatibleArchitectures:
+        - x86_64
+      RetentionPolicy: Delete
+
+  # Lambda function for resume processing with Strands agents
+  ResumeProcessorFunction:
+    Type: AWS::Serverless::Function
+    DependsOn: StrandsDependenciesLayer
+    Properties:
+      FunctionName: !Sub strands-agent-resume-processor-${Environment}
+      CodeUri: packaging/app.zip
+      Handler: app.lambda_handler
+      Description: Process resumes using Strands multi-agent collaboration
+      Layers:
+        - !Ref StrandsDependenciesLayer
+      Environment:
+        Variables:
+          CANDIDATES_TABLE: 
+            Fn::ImportValue: !Sub ${InfrastructureStackName}-CandidatesTable
+          DOCUMENTS_BUCKET: 
+            Fn::ImportValue: !Sub ${InfrastructureStackName}-DocumentsBucket
+          STRANDS_MODEL_ID: !Ref ModelId
+          STRANDS_DEBUG_LEVEL: INFO
+      Policies:
+        - S3ReadPolicy:
+            BucketName: 
+              Fn::ImportValue: !Sub ${InfrastructureStackName}-DocumentsBucket
+        - DynamoDBCrudPolicy:
+            TableName: 
+              Fn::ImportValue: !Sub ${InfrastructureStackName}-CandidatesTable
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+                - bedrock:InvokeModelWithResponseStream
+                - bedrock:ListFoundationModels
+              Resource: '*'
+            - Effect: Allow
+              Action:
+                - logs:CreateLogGroup
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+              Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*'
+
+  # Lambda permission for S3 to invoke the function
+  S3InvokeLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ResumeProcessorFunction
+      Action: lambda:InvokeFunction
+      Principal: s3.amazonaws.com
+      SourceAccount: !Ref AWS::AccountId
+      SourceArn: 
+        Fn::ImportValue: !Sub ${InfrastructureStackName}-DocumentsBucketArn
+
+  # CloudWatch Log Group for the Lambda function
+  ResumeProcessorLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/strands-agent-resume-processor-${Environment}'
+      RetentionInDays: 14
+
+  # CloudWatch Dashboard for monitoring
+  StrandsAgentDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub StrandsAgent-${Environment}
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 0,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [ "AWS/Lambda", "Invocations", "FunctionName", "${ResumeProcessorFunction}" ],
+                  [ ".", "Errors", ".", "." ],
+                  [ ".", "Duration", ".", "." ]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "${AWS::Region}",
+                "title": "Lambda Function Metrics",
+                "period": 300
+              }
+            },
+            {
+              "type": "log",
+              "x": 0,
+              "y": 6,
+              "width": 24,
+              "height": 6,
+              "properties": {
+                "query": "SOURCE '/aws/lambda/strands-agent-resume-processor-${Environment}'\n| fields @timestamp, @message\n| filter @message like /ERROR/\n| sort @timestamp desc\n| limit 20",
+                "region": "${AWS::Region}",
+                "title": "Recent Errors",
+                "view": "table"
+              }
+            }
+          ]
+        }
+
+Outputs:
+  ResumeProcessorFunction:
+    Description: Lambda function for processing resumes with Strands agents
+    Value: !Ref ResumeProcessorFunction
+    Export:
+      Name: !Sub ${AWS::StackName}-ResumeProcessorFunction
+
+  ResumeProcessorFunctionArn:
+    Description: ARN of the resume processor Lambda function
+    Value: !GetAtt ResumeProcessorFunction.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-ResumeProcessorFunctionArn
+
+  DashboardURL:
+    Description: CloudWatch Dashboard URL for monitoring
+    Value: !Sub 'https://${AWS::Region}.console.aws.amazon.com/cloudwatch/home?region=${AWS::Region}#dashboards:name=${StrandsAgentDashboard}'
+
+  SampleUploadCommands:
+    Description: Sample commands to upload test data
+    Value: !Sub |
+      # Get bucket and table names:
+      BUCKET=$(aws cloudformation describe-stacks --stack-name ${InfrastructureStackName} --query 'Stacks[0].Outputs[?OutputKey==\`DocumentsBucket\`].OutputValue' --output text)
+      TABLE=$(aws cloudformation describe-stacks --stack-name ${InfrastructureStackName} --query 'Stacks[0].Outputs[?OutputKey==\`CandidatesTable\`].OutputValue' --output text)
+      
+      # Upload job description:
+      aws s3 cp ../samples/jobs/ai_engineer_position.txt s3://$BUCKET/jobs/
+      
+      # Upload resume (triggers processing):
+      aws s3 cp ../samples/resumes/resume.txt s3://$BUCKET/resumes/
+      
+      # Query results:
+      aws dynamodb scan --table-name $TABLE --region ${AWS::Region}
+    
+  DocumentsBucket:
+    Description: S3 bucket name from infrastructure stack
+    Value: 
+      Fn::ImportValue: !Sub ${InfrastructureStackName}-DocumentsBucket
+      
+  CandidatesTable:
+    Description: DynamoDB table name from infrastructure stack  
+    Value:
+      Fn::ImportValue: !Sub ${InfrastructureStackName}-CandidatesTable

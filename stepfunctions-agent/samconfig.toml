@@ -1,0 +1,9 @@
+version = 0.1
+[default.deploy.parameters]
+stack_name = "stepfunctions-agent"
+resolve_s3 = true
+s3_prefix = "stepfunctions-agent"
+region = "us-east-1"
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = "Environment=\"dev\""
+image_repositories = []

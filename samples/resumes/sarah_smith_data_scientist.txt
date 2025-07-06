@@ -1,0 +1,67 @@
+SARAH SMITH
+Data Scientist & Machine Learning Engineer
+
+Contact Information:
+Email: sarah.smith@email.com
+Phone: (555) 987-6543
+Location: Seattle, WA
+LinkedIn: linkedin.com/in/sarahsmith
+GitHub: github.com/sarahsmith
+
+PROFESSIONAL SUMMARY
+Data Scientist with 2 years of experience in machine learning and statistical analysis. Strong background in Python programming and data visualization. Recent graduate with a Master's degree in Statistics and passion for applying ML techniques to solve business problems.
+
+TECHNICAL SKILLS
+Programming Languages: Python, R, SQL
+ML/AI Frameworks: Scikit-learn, Pandas, NumPy
+Data Visualization: Matplotlib, Seaborn, Tableau
+Databases: MySQL, PostgreSQL
+Cloud Platforms: Basic AWS knowledge (S3, EC2)
+Tools: Jupyter Notebooks, Git, Excel
+
+PROFESSIONAL EXPERIENCE
+
+Data Scientist | Analytics Corp | Seattle, WA | 2022 - Present
+• Developed predictive models for customer churn using logistic regression and random forests
+• Created data visualizations and dashboards for business stakeholders
+• Performed statistical analysis on customer behavior data
+• Collaborated with product team to implement A/B testing framework
+
+Data Analyst Intern | TechStart Inc. | Seattle, WA | Summer 2021
+• Analyzed user engagement data using SQL and Python
+• Built automated reporting scripts to track key performance metrics
+• Assisted in data cleaning and preprocessing for ML projects
+
+EDUCATION
+
+Master of Science in Statistics | University of Washington | 2022
+• GPA: 3.6/4.0
+• Thesis: "Statistical Methods for Time Series Forecasting"
+• Relevant Coursework: Machine Learning, Statistical Modeling, Data Mining
+
+Bachelor of Science in Mathematics | Western Washington University | 2020
+• GPA: 3.5/4.0, Cum Laude
+• Minor in Computer Science
+
+PROJECTS
+
+Customer Segmentation Analysis (2023)
+• Used K-means clustering to segment customers based on purchasing behavior
+• Implemented using Python and Scikit-learn
+• Presented findings to marketing team for targeted campaigns
+
+Stock Price Prediction Model (2022)
+• Built LSTM model to predict stock prices using historical data
+• Achieved 15% improvement over baseline linear regression model
+• Used Python, TensorFlow, and financial APIs
+
+CERTIFICATIONS
+• Google Analytics Certified (2023)
+• Coursera Machine Learning Course Completion (2021)
+
+LANGUAGES
+• English (Native)
+• Spanish (Intermediate)
+
+INTERESTS
+Data visualization, hiking, photography, volunteer tutoring in mathematics

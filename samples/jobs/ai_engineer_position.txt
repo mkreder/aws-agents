@@ -1,0 +1,56 @@
+AI Engineer Position - Senior Level
+
+Company: TechCorp Solutions
+Location: San Francisco, CA (Remote options available)
+Department: Artificial Intelligence & Machine Learning
+
+Job Description:
+We are seeking a highly skilled AI Engineer to join our growing AI/ML team. The successful candidate will be responsible for designing, developing, and deploying machine learning models and AI systems that drive business value.
+
+Key Responsibilities:
+- Design and implement machine learning algorithms and models
+- Develop and maintain AI/ML pipelines and infrastructure
+- Collaborate with data scientists and software engineers
+- Optimize model performance and scalability
+- Deploy models to production environments
+- Monitor and maintain deployed AI systems
+- Research and evaluate new AI/ML technologies and techniques
+
+Required Qualifications:
+- Bachelor's or Master's degree in Computer Science, AI, Machine Learning, or related field
+- 3+ years of experience in machine learning and AI development
+- Strong programming skills in Python and/or R
+- Experience with ML frameworks (TensorFlow, PyTorch, Scikit-learn)
+- Knowledge of cloud platforms (AWS, GCP, or Azure)
+- Experience with containerization (Docker, Kubernetes)
+- Understanding of MLOps practices and tools
+- Strong problem-solving and analytical skills
+- Excellent communication and teamwork abilities
+
+Preferred Qualifications:
+- PhD in AI, Machine Learning, or related field
+- Experience with deep learning and neural networks
+- Knowledge of natural language processing (NLP)
+- Experience with big data technologies (Spark, Hadoop)
+- Familiarity with CI/CD pipelines
+- Experience with model monitoring and observability tools
+- Publications in AI/ML conferences or journals
+
+Technical Skills:
+- Programming: Python, R, SQL, Java (preferred)
+- ML Frameworks: TensorFlow, PyTorch, Scikit-learn, Keras
+- Cloud: AWS (SageMaker, EC2, S3), GCP, or Azure
+- Tools: Git, Docker, Kubernetes, Jupyter, MLflow
+- Databases: PostgreSQL, MongoDB, Redis
+- Big Data: Apache Spark, Hadoop (preferred)
+
+Compensation:
+- Salary: $120,000 - $180,000 annually
+- Equity package
+- Comprehensive health benefits
+- 401(k) with company matching
+- Flexible PTO policy
+- Professional development budget
+
+About TechCorp Solutions:
+TechCorp Solutions is a leading technology company focused on developing innovative AI-powered solutions for enterprise clients. We pride ourselves on fostering a collaborative, inclusive environment where talented individuals can grow and make a meaningful impact.

@@ -1,0 +1,17 @@
+FROM --platform=linux/amd64 python:3.11-slim
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    make \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create working directory
+WORKDIR /build
+
+# Install Strands dependencies
+RUN pip install --target /build/dependencies strands-agents==0.1.9 strands-agents-tools==0.1.7
+
+# The dependencies will be in /build/dependencies
+CMD ["ls", "-la", "/build/dependencies"]

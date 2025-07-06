@@ -1,0 +1,20 @@
+{
+  "Records": [
+    {
+      "eventVersion": "2.1",
+      "eventSource": "aws:s3",
+      "awsRegion": "us-east-1",
+      "eventTime": "2025-06-27T20:45:00.000Z",
+      "eventName": "ObjectCreated:Put",
+      "s3": {
+        "bucket": {
+          "name": "bedrock-agent-documents-dev"
+        },
+        "object": {
+          "key": "resumes/sarah_chen_claude_v2_test_1751056976.txt",
+          "size": 2875
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,34 @@
+{
+  "Comment": "Resume Evaluation Workflow",
+  "StartAt": "EvaluateResume",
+  "States": {
+    "EvaluateResume": {
+      "Type": "Task",
+      "Resource": "${EvaluateResumeFunctionArn}",
+      "Comment": "Invoke AWS Bedrock to evaluate the resume and summarize key skills",
+      "ResultPath": "$.evaluation",
+      "Next": "IdentifyGaps"
+    },
+    "IdentifyGaps": {
+      "Type": "Task",
+      "Resource": "${IdentifyGapsFunctionArn}",
+      "Comment": "Identify gaps or inconsistencies in the resume",
+      "ResultPath": "$.gaps",
+      "Next": "RateCandidate"
+    },
+    "RateCandidate": {
+      "Type": "Task",
+      "Resource": "${RateCandidateFunctionArn}",
+      "Comment": "Rate the candidate from 1-5 based on resume evaluation",
+      "ResultPath": "$.rating",
+      "Next": "GenerateInterviewNotes"
+    },
+    "GenerateInterviewNotes": {
+      "Type": "Task",
+      "Resource": "${GenerateInterviewNotesFunctionArn}",
+      "Comment": "Generate interview preparation notes for recruiters",
+      "ResultPath": "$.interview_notes",
+      "End": true
+    }
+  }
+}

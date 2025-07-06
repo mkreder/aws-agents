@@ -1,0 +1,572 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: HR AI Agent - Multi-Agent Collaboration with Amazon Bedrock Agents (Phase 1)
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    Description: Environment name (dev, test, prod)
+  
+  BedrockModelId:
+    Type: String
+    Default: us.anthropic.claude-3-7-sonnet-20250219-v1:0
+    Description: Amazon Bedrock inference profile ID for Claude 3.7 Sonnet
+
+Resources:
+  # DynamoDB Tables
+  CandidatesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${AWS::StackName}-candidates-${Environment}"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+
+  # IAM Role for Bedrock Agents
+  BedrockAgentRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AWS::StackName}-BedrockAgentRole"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: bedrock.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonBedrockFullAccess
+      Policies:
+        - PolicyName: DynamoDBAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                Resource:
+                  - !GetAtt CandidatesTable.Arn
+        - PolicyName: LambdaInvokeAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource:
+                  - !GetAtt AgentExecutorFunction.Arn
+
+  # Lambda function for agent actions
+  AgentExecutorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-agent-executor-${Environment}"
+      CodeUri: functions/agent_executor/
+      Handler: app.lambda_handler
+      Runtime: python3.11
+      Timeout: 60
+      Environment:
+        Variables:
+          CANDIDATES_TABLE: !Ref CandidatesTable
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CandidatesTable
+
+  AgentExecutorPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref AgentExecutorFunction
+      Action: lambda:InvokeFunction
+      Principal: bedrock.amazonaws.com
+
+  # 1. Resume Parser Agent - Based on stepfunctions resume_parser
+  ResumeParserAgent:
+    Type: AWS::Bedrock::Agent
+    Properties:
+      AgentName: !Sub "${AWS::StackName}-resume-parser-${Environment}"
+      AgentResourceRoleArn: !GetAtt BedrockAgentRole.Arn
+      Description: Specialized agent for parsing resumes and extracting key information
+      FoundationModel: !Ref BedrockModelId
+      IdleSessionTTLInSeconds: 1800
+      Instruction: |
+        You are a Resume Parser Agent specializing in extracting structured information from resumes.
+
+        When given a resume, extract the following information:
+
+        1. **Personal Information**:
+           - Full name
+           - Contact information (email, phone, location)
+           - Professional title/role
+           - LinkedIn/portfolio URLs
+
+        2. **Work Experience**:
+           - Company names
+           - Job titles
+           - Employment dates (start and end)
+           - Key responsibilities and achievements
+           - Technologies/tools used
+           - Quantifiable results and metrics
+
+        3. **Education**:
+           - Degrees and certifications
+           - Institutions
+           - Graduation dates
+           - Relevant coursework
+           - Academic achievements
+
+        4. **Skills**:
+           - Technical skills (programming languages, tools, platforms)
+           - Soft skills
+           - Languages
+           - Proficiency levels when specified
+
+        5. **Projects**:
+           - Project names
+           - Descriptions
+           - Technologies used
+           - Role and contributions
+           - Outcomes and impact
+
+        Always structure your response as a JSON object with these categories. Be thorough and extract all relevant information, but do not invent or assume details not present in the resume.
+
+  ResumeParserAgentAlias:
+    Type: AWS::Bedrock::AgentAlias
+    Properties:
+      AgentId: !Ref ResumeParserAgent
+      AgentAliasName: !Sub "${Environment}-alias"
+      Description: !Sub "Resume parser agent alias for ${Environment}"
+
+  # 2. Job Analyzer Agent
+  JobAnalyzerAgent:
+    Type: AWS::Bedrock::Agent
+    Properties:
+      AgentName: !Sub "${AWS::StackName}-job-analyzer-${Environment}"
+      AgentResourceRoleArn: !GetAtt BedrockAgentRole.Arn
+      Description: Specialized agent for analyzing job descriptions and requirements
+      FoundationModel: !Ref BedrockModelId
+      IdleSessionTTLInSeconds: 1800
+      Instruction: |
+        You are a Job Analyzer Agent specializing in extracting and analyzing job requirements from job descriptions.
+
+        When given a job description, analyze and extract the following information:
+
+        1. **Required Qualifications**:
+           - Education requirements
+           - Years of experience
+           - Technical skills and proficiency levels
+           - Certifications
+           - Domain knowledge
+
+        2. **Preferred Qualifications**:
+           - Additional skills that are beneficial
+           - Nice-to-have experience
+           - Optional certifications
+           - Preferred background
+
+        3. **Technical Skills**:
+           - Programming languages
+           - Frameworks and libraries
+           - Tools and platforms
+           - Methodologies
+           - Required proficiency levels
+
+        4. **Company Culture**:
+           - Work environment
+           - Team structure
+           - Company values
+           - Work-life balance indicators
+           - Remote/hybrid/onsite expectations
+
+        5. **Compensation and Benefits**:
+           - Salary range (if provided)
+           - Benefits mentioned
+           - Perks
+           - Growth opportunities
+
+        Always structure your response as a JSON object with these categories. Be thorough and extract all relevant information, but do not invent or assume details not present in the job description.
+
+  JobAnalyzerAgentAlias:
+    Type: AWS::Bedrock::AgentAlias
+    Properties:
+      AgentId: !Ref JobAnalyzerAgent
+      AgentAliasName: !Sub "${Environment}-alias"
+      Description: !Sub "Job analyzer agent alias for ${Environment}"
+
+  # 3. Resume Evaluator Agent
+  ResumeEvaluatorAgent:
+    Type: AWS::Bedrock::Agent
+    Properties:
+      AgentName: !Sub "${AWS::StackName}-resume-evaluator-${Environment}"
+      AgentResourceRoleArn: !GetAtt BedrockAgentRole.Arn
+      Description: Specialized agent for evaluating resumes against job requirements
+      FoundationModel: !Ref BedrockModelId
+      IdleSessionTTLInSeconds: 1800
+      Instruction: |
+        You are a Resume Evaluator Agent specializing in comparing candidate resumes against job requirements.
+
+        When given a resume and job description, evaluate the following:
+
+        1. **Skills Match Analysis**:
+           - Technical skills alignment
+           - Proficiency level match
+           - Missing critical skills
+           - Transferable skills
+           - Skill relevance to the role
+
+        2. **Experience Relevance Assessment**:
+           - Industry relevance
+           - Role similarity
+           - Project relevance
+           - Years of experience match
+           - Leadership/management experience (if required)
+
+        3. **Education Fit Evaluation**:
+           - Degree requirements match
+           - Relevant certifications
+           - Specialized training alignment
+           - Continuing education relevance
+
+        4. **Project Relevance Review**:
+           - Project scale and complexity match
+           - Technology stack alignment
+           - Problem domain relevance
+           - Demonstrated outcomes
+
+        5. **Career Progression Analysis**:
+           - Growth trajectory
+           - Increasing responsibility
+           - Promotion history
+           - Job stability
+           - Career focus alignment
+
+        Always structure your response as a JSON object with these categories. Provide detailed analysis with specific examples from the resume that match or don't match the job requirements. Be objective and thorough in your evaluation.
+
+  ResumeEvaluatorAgentAlias:
+    Type: AWS::Bedrock::AgentAlias
+    Properties:
+      AgentId: !Ref ResumeEvaluatorAgent
+      AgentAliasName: !Sub "${Environment}-alias"
+      Description: !Sub "Resume evaluator agent alias for ${Environment}"
+
+  # 4. Gap Identifier Agent
+  GapIdentifierAgent:
+    Type: AWS::Bedrock::Agent
+    Properties:
+      AgentName: !Sub "${AWS::StackName}-gap-identifier-${Environment}"
+      AgentResourceRoleArn: !GetAtt BedrockAgentRole.Arn
+      Description: Specialized agent for identifying gaps and inconsistencies in resumes
+      FoundationModel: !Ref BedrockModelId
+      IdleSessionTTLInSeconds: 1800
+      Instruction: |
+        You are a Gap Identifier Agent specializing in finding inconsistencies, gaps, and missing information in resumes when compared to job requirements.
+
+        When given a resume and job description, identify the following:
+
+        1. **Missing Qualifications**:
+           - Required skills not mentioned in the resume
+           - Missing education requirements
+           - Insufficient years of experience
+           - Absent certifications
+           - Lacking domain knowledge
+
+        2. **Experience Gaps**:
+           - Employment timeline gaps
+           - Missing relevant industry experience
+           - Insufficient depth in required areas
+           - Lack of specific project types
+           - Missing leadership experience (if required)
+
+        3. **Skill Mismatches**:
+           - Outdated technical skills
+           - Missing proficiency levels
+           - Irrelevant skill focus
+           - Lack of required soft skills
+           - Missing tool/platform experience
+
+        4. **Timeline Inconsistencies**:
+           - Overlapping job dates
+           - Unexplained career gaps
+           - Short-term positions without explanation
+           - Inconsistent job progression
+           - Unclear duration of projects
+
+        5. **Areas Needing Clarification**:
+           - Vague accomplishments
+           - Unclear responsibilities
+           - Ambiguous skill levels
+           - Unexplained career changes
+           - Incomplete project details
+
+        Always structure your response as a JSON object with these categories. Be specific about what's missing or inconsistent, citing examples from both the resume and job description. Focus on identifying factual gaps rather than making subjective judgments.
+
+  GapIdentifierAgentAlias:
+    Type: AWS::Bedrock::AgentAlias
+    Properties:
+      AgentId: !Ref GapIdentifierAgent
+      AgentAliasName: !Sub "${Environment}-alias"
+      Description: !Sub "Gap identifier agent alias for ${Environment}"
+
+  # 5. Candidate Rater Agent
+  CandidateRaterAgent:
+    Type: AWS::Bedrock::Agent
+    Properties:
+      AgentName: !Sub "${AWS::StackName}-candidate-rater-${Environment}"
+      AgentResourceRoleArn: !GetAtt BedrockAgentRole.Arn
+      Description: Specialized agent for rating candidates on a 1-5 scale
+      FoundationModel: !Ref BedrockModelId
+      IdleSessionTTLInSeconds: 1800
+      Instruction: |
+        You are a Candidate Rater Agent specializing in evaluating and scoring candidates on a 1-5 scale based on their resume and fit for a specific job.
+
+        When given a resume and job description, provide the following:
+
+        1. **Overall Fit Score** (1-5 scale):
+           - 1: Poor fit - Significant gaps in multiple critical areas
+           - 2: Below average fit - Missing several important requirements
+           - 3: Average fit - Meets basic requirements but has notable gaps
+           - 4: Good fit - Meets most requirements with minor gaps
+           - 5: Excellent fit - Meets or exceeds all key requirements
+
+        2. **Detailed Justification**:
+           - Clear explanation of the rating
+           - Evidence-based reasoning
+           - Balanced assessment of strengths and weaknesses
+           - Consideration of both technical and soft skills
+           - Alignment with company culture (if mentioned)
+
+        3. **Strengths**:
+           - Key qualifications that match the job
+           - Standout skills and experiences
+           - Unique value propositions
+           - Relevant achievements
+           - Potential contributions
+
+        4. **Weaknesses**:
+           - Missing required qualifications
+           - Experience gaps
+           - Skill deficiencies
+           - Potential red flags
+           - Areas needing development
+
+        5. **Risk Assessment**:
+           - Likelihood of success in the role
+           - Potential onboarding challenges
+           - Learning curve considerations
+           - Retention risk factors
+           - Performance risk factors
+
+        6. **Growth Potential**:
+           - Career trajectory alignment
+           - Learning capacity indicators
+           - Adaptability signals
+           - Leadership potential (if relevant)
+           - Long-term fit assessment
+
+        Always structure your response as a JSON object with these categories. Be objective and thorough in your assessment, providing specific examples from the resume to support your rating and analysis.
+
+  CandidateRaterAgentAlias:
+    Type: AWS::Bedrock::AgentAlias
+    Properties:
+      AgentId: !Ref CandidateRaterAgent
+      AgentAliasName: !Sub "${Environment}-alias"
+      Description: !Sub "Candidate rater agent alias for ${Environment}"
+
+  # 6. Interview Notes Agent
+  InterviewNotesAgent:
+    Type: AWS::Bedrock::Agent
+    Properties:
+      AgentName: !Sub "${AWS::StackName}-interview-notes-${Environment}"
+      AgentResourceRoleArn: !GetAtt BedrockAgentRole.Arn
+      Description: Specialized agent for generating interview preparation materials
+      FoundationModel: !Ref BedrockModelId
+      IdleSessionTTLInSeconds: 1800
+      Instruction: |
+        You are an Interview Notes Agent specializing in generating interview preparation materials based on a candidate's resume and a job description.
+
+        When given a resume and job description, generate the following:
+
+        1. **Technical Questions**:
+           - Skill verification questions
+           - Technical knowledge assessment
+           - Problem-solving scenarios
+           - Tool/platform proficiency checks
+           - Coding/design challenges (if applicable)
+
+        2. **Experience-Based Questions**:
+           - Questions about specific projects
+           - Role-specific scenario questions
+           - Achievement verification questions
+           - Team collaboration examples
+           - Challenge resolution examples
+
+        3. **Areas to Probe Deeper**:
+           - Unclear resume points
+           - Potential skill gaps
+           - Experience mismatches
+           - Career transition explanations
+           - Specific accomplishment details
+
+        4. **Concerns to Address**:
+           - Employment gaps
+           - Job hopping patterns
+           - Missing required skills
+           - Unclear responsibilities
+           - Potential cultural fit issues
+
+        5. **Behavioral Assessment**:
+           - Team collaboration style
+           - Problem-solving approach
+           - Communication effectiveness
+           - Leadership capabilities (if relevant)
+           - Adaptability indicators
+
+        Always structure your response as a JSON object with these categories. Create specific, tailored questions that will help assess the candidate's fit for the role. Focus on uncovering both technical capabilities and soft skills relevant to the position.
+
+  InterviewNotesAgentAlias:
+    Type: AWS::Bedrock::AgentAlias
+    Properties:
+      AgentId: !Ref InterviewNotesAgent
+      AgentAliasName: !Sub "${Environment}-alias"
+      Description: !Sub "Interview notes agent alias for ${Environment}"
+
+  # 7. Supervisor Agent (without collaborators in Phase 1)
+  SupervisorAgent:
+    Type: AWS::Bedrock::Agent
+    Properties:
+      AgentName: !Sub "${AWS::StackName}-supervisor-${Environment}"
+      AgentResourceRoleArn: !GetAtt BedrockAgentRole.Arn
+      Description: Supervisor agent that coordinates with specialized collaborator agents for comprehensive resume evaluation
+      FoundationModel: !Ref BedrockModelId
+      IdleSessionTTLInSeconds: 1800
+      # AgentCollaboration: SUPERVISOR_ROUTER  # Will be set manually after deployment
+      Instruction: |
+        You are the Supervisor Agent for HR resume evaluation. You coordinate with specialized collaborator agents to provide comprehensive candidate evaluations.
+
+        When evaluating a candidate, work with your team naturally:
+
+        1. Start by having ResumeParserAgent extract and structure the key information from the resume
+        2. Have JobAnalyzerAgent analyze the job requirements and identify what qualifications are needed
+        3. Have ResumeEvaluatorAgent evaluate how well the candidate matches the job requirements
+        4. Have CandidateRaterAgent provide a numerical rating (1-5 scale) with detailed justification
+
+        Your team members are:
+        - ResumeParserAgent: Extracts structured information from resumes
+        - JobAnalyzerAgent: Analyzes job descriptions and requirements  
+        - ResumeEvaluatorAgent: Evaluates candidate fit against job requirements
+        - CandidateRaterAgent: Provides numerical ratings with justification
+
+        Work collaboratively with your team. When you need specific expertise, naturally delegate to the appropriate team member. After gathering all the information from your collaborators, compile everything into a comprehensive evaluation report.
+
+        Focus on coordinating the work and compiling the final results rather than doing the specialized analysis yourself.
+
+        Always provide your final response as a comprehensive JSON structure containing all evaluation results.
+
+        Format your response as:
+        {
+          "candidate_evaluation": {
+            "candidate_id": "unique_identifier",
+            "candidate_name": "extracted_name",
+            "resume_parsing": { "personal_info": {}, "experience": [], "education": [], "skills": [], "projects": [] },
+            "job_analysis": { "requirements": {}, "preferred": {}, "culture": {} },
+            "resume_evaluation": { "skills_match": {}, "experience_relevance": {}, "education_fit": {} },
+            "gap_analysis": { "missing_qualifications": [], "concerns": [], "clarifications_needed": [] },
+            "candidate_rating": { "overall_score": 0, "justification": "", "strengths": [], "weaknesses": [] },
+            "interview_notes": { "technical_questions": [], "experience_questions": [], "areas_to_probe": [] },
+            "final_recommendation": "detailed_summary_and_recommendation"
+          }
+        }
+
+  SupervisorAgentAlias:
+    Type: AWS::Bedrock::AgentAlias
+    Properties:
+      AgentId: !Ref SupervisorAgent
+      AgentAliasName: !Sub "${Environment}-alias"
+      Description: !Sub "Supervisor agent alias for ${Environment}"
+
+Outputs:
+  # Supervisor Agent (Main Entry Point)
+  SupervisorAgentId:
+    Description: Supervisor Agent ID
+    Value: !Ref SupervisorAgent
+    Export:
+      Name: !Sub "${AWS::StackName}-supervisor-agent-id"
+
+  SupervisorAgentAliasId:
+    Description: Supervisor Agent Alias ID
+    Value: !GetAtt SupervisorAgentAlias.AgentAliasId
+    Export:
+      Name: !Sub "${AWS::StackName}-supervisor-agent-alias-id"
+
+  # Specialized Agents
+  ResumeParserAgentId:
+    Description: Resume Parser Agent ID
+    Value: !Ref ResumeParserAgent
+    Export:
+      Name: !Sub "${AWS::StackName}-resume-parser-agent-id"
+
+  JobAnalyzerAgentId:
+    Description: Job Analyzer Agent ID
+    Value: !Ref JobAnalyzerAgent
+    Export:
+      Name: !Sub "${AWS::StackName}-job-analyzer-agent-id"
+
+  ResumeEvaluatorAgentId:
+    Description: Resume Evaluator Agent ID
+    Value: !Ref ResumeEvaluatorAgent
+    Export:
+      Name: !Sub "${AWS::StackName}-resume-evaluator-agent-id"
+
+  GapIdentifierAgentId:
+    Description: Gap Identifier Agent ID
+    Value: !Ref GapIdentifierAgent
+    Export:
+      Name: !Sub "${AWS::StackName}-gap-identifier-agent-id"
+
+  CandidateRaterAgentId:
+    Description: Candidate Rater Agent ID
+    Value: !Ref CandidateRaterAgent
+    Export:
+      Name: !Sub "${AWS::StackName}-candidate-rater-agent-id"
+
+  InterviewNotesAgentId:
+    Description: Interview Notes Agent ID
+    Value: !Ref InterviewNotesAgent
+    Export:
+      Name: !Sub "${AWS::StackName}-interview-notes-agent-id"
+
+  # Tables
+  CandidatesTableName:
+    Description: DynamoDB table for storing candidate data
+    Value: !Ref CandidatesTable
+    Export:
+      Name: !Sub "${AWS::StackName}-candidates-table"
+
+  CandidatesTableArn:
+    Description: DynamoDB table ARN for storing candidate data
+    Value: !GetAtt CandidatesTable.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-candidates-table-arn"
+
+  # Lambda Function
+  AgentExecutorFunctionArn:
+    Description: Agent Executor Lambda Function ARN
+    Value: !GetAtt AgentExecutorFunction.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-agent-executor-arn"
+      
+  # IAM Role
+  BedrockAgentRoleArn:
+    Description: IAM Role ARN for Bedrock Agents
+    Value: !GetAtt BedrockAgentRole.Arn
+    Export:
+      Name: !Sub "bedrock-agent-agent-role-arn"

@@ -1,0 +1,248 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: HR AI Agent - Resume evaluation workflow using Step Functions and AWS Bedrock
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    Description: Environment name (dev, test, prod)
+
+Globals:
+  Function:
+    Timeout: 60
+    MemorySize: 256
+    Runtime: python3.11
+    Architectures:
+      - x86_64
+    Environment:
+      Variables:
+        LOG_LEVEL: INFO
+
+Resources:
+  # DynamoDB Tables
+  CandidatesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${AWS::StackName}-candidates-${Environment}"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+
+  JobsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${AWS::StackName}-jobs-${Environment}"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+
+  # Lambda Functions
+  ResumeParserFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/resume_parser/
+      Handler: app.lambda_handler
+      Description: Parses candidate resumes and extracts key information
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Sub "${AWS::StackName}-documents-${Environment}"
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CandidatesTable
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - states:StartExecution
+              Resource: !GetAtt ResumeEvaluationStateMachine.Arn
+      Environment:
+        Variables:
+          CANDIDATES_TABLE: !Ref CandidatesTable
+          STATE_MACHINE_ARN: !Ref ResumeEvaluationStateMachine
+
+  JobExtractorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/job_extractor/
+      Handler: app.lambda_handler
+      Description: Parses job descriptions and extracts key requirements
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Sub "${AWS::StackName}-documents-${Environment}"
+        - DynamoDBCrudPolicy:
+            TableName: !Ref JobsTable
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+              Resource: 
+                - 'arn:aws:bedrock:*:*:inference-profile/*'
+                - 'arn:aws:bedrock:*::foundation-model/*'
+      Environment:
+        Variables:
+          JOBS_TABLE: !Ref JobsTable
+
+  # S3 Bucket for storing resumes and job descriptions
+  DocumentsBucket:
+    Type: AWS::S3::Bucket
+    DependsOn: 
+      - ResumeParserFunctionPermission
+      - JobExtractorFunctionPermission
+    Properties:
+      BucketName: !Sub "${AWS::StackName}-documents-${Environment}"
+      NotificationConfiguration:
+        LambdaConfigurations:
+          - Event: s3:ObjectCreated:*
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: resumes/
+            Function: !GetAtt ResumeParserFunction.Arn
+          - Event: s3:ObjectCreated:*
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: jobs/
+            Function: !GetAtt JobExtractorFunction.Arn
+
+  # Lambda permissions for S3 to invoke functions
+  ResumeParserFunctionPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref ResumeParserFunction
+      Principal: s3.amazonaws.com
+      SourceArn: !Sub "arn:aws:s3:::${AWS::StackName}-documents-${Environment}"
+
+  JobExtractorFunctionPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref JobExtractorFunction
+      Principal: s3.amazonaws.com
+      SourceArn: !Sub "arn:aws:s3:::${AWS::StackName}-documents-${Environment}"
+
+  EvaluateResumeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/evaluate_resume/
+      Handler: app.lambda_handler
+      Description: Uses AWS Bedrock to evaluate the resume and summarize key skills
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref CandidatesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref JobsTable
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+              Resource: 
+                - 'arn:aws:bedrock:*:*:inference-profile/*'
+                - 'arn:aws:bedrock:*::foundation-model/*'
+      Environment:
+        Variables:
+          JOBS_TABLE: !Ref JobsTable
+
+  IdentifyGapsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/identify_gaps/
+      Handler: app.lambda_handler
+      Description: Identifies gaps or inconsistencies in the resume
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+              Resource: 
+                - 'arn:aws:bedrock:*:*:inference-profile/*'
+                - 'arn:aws:bedrock:*::foundation-model/*'
+
+  RateCandidateFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/rate_candidate/
+      Handler: app.lambda_handler
+      Description: Rates the candidate from 1-5 based on resume evaluation
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref JobsTable
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+              Resource: 
+                - 'arn:aws:bedrock:*:*:inference-profile/*'
+                - 'arn:aws:bedrock:*::foundation-model/*'
+      Environment:
+        Variables:
+          JOBS_TABLE: !Ref JobsTable
+
+  GenerateInterviewNotesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/generate_interview_notes/
+      Handler: app.lambda_handler
+      Description: Generates interview preparation notes for recruiters
+      Policies:
+        - DynamoDBWritePolicy:
+            TableName: !Ref CandidatesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref JobsTable
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+              Resource: 
+                - 'arn:aws:bedrock:*:*:inference-profile/*'
+                - 'arn:aws:bedrock:*::foundation-model/*'
+      Environment:
+        Variables:
+          CANDIDATES_TABLE: !Ref CandidatesTable
+          JOBS_TABLE: !Ref JobsTable
+
+  # Step Functions State Machine
+  ResumeEvaluationStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Name: !Sub "${AWS::StackName}-resume-evaluation-${Environment}"
+      DefinitionUri: statemachine/resume_evaluation.asl.json
+      DefinitionSubstitutions:
+        EvaluateResumeFunctionArn: !GetAtt EvaluateResumeFunction.Arn
+        IdentifyGapsFunctionArn: !GetAtt IdentifyGapsFunction.Arn
+        RateCandidateFunctionArn: !GetAtt RateCandidateFunction.Arn
+        GenerateInterviewNotesFunctionArn: !GetAtt GenerateInterviewNotesFunction.Arn
+      Policies:
+        - LambdaInvokePolicy:
+            FunctionName: !Ref EvaluateResumeFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref IdentifyGapsFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref RateCandidateFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref GenerateInterviewNotesFunction
+
+Outputs:
+  DocumentsBucketName:
+    Description: "S3 bucket for storing resumes and job descriptions"
+    Value: !Ref DocumentsBucket
+  
+  ResumeEvaluationStateMachine:
+    Description: "Step Functions state machine for resume evaluation"
+    Value: !Ref ResumeEvaluationStateMachine

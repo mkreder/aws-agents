@@ -1,0 +1,79 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Strands Multi-Agent HR Resume Evaluation System - Infrastructure Phase
+  
+  This template creates the basic infrastructure (S3, DynamoDB) without Lambda dependencies.
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    Description: Environment name (dev, staging, prod)
+
+Resources:
+  # S3 Bucket for document storage
+  DocumentsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub strands-agent-documents-${Environment}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  # DynamoDB table for candidate evaluations
+  CandidatesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub strands-agent-candidates-${Environment}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+        - AttributeName: status
+          AttributeType: S
+        - AttributeName: created_at
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: status-created_at-index
+          KeySchema:
+            - AttributeName: status
+              KeyType: HASH
+            - AttributeName: created_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+
+Outputs:
+  DocumentsBucket:
+    Description: S3 bucket for storing resumes and job descriptions
+    Value: !Ref DocumentsBucket
+    Export:
+      Name: !Sub ${AWS::StackName}-DocumentsBucket
+
+  DocumentsBucketArn:
+    Description: ARN of the S3 bucket
+    Value: !GetAtt DocumentsBucket.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-DocumentsBucketArn
+
+  CandidatesTable:
+    Description: DynamoDB table for candidate evaluations
+    Value: !Ref CandidatesTable
+    Export:
+      Name: !Sub ${AWS::StackName}-CandidatesTable
+
+  CandidatesTableArn:
+    Description: ARN of the DynamoDB table
+    Value: !GetAtt CandidatesTable.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-CandidatesTableArn
