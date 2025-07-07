@@ -171,13 +171,6 @@ Both implementations produce structured evaluation data including:
 
 This project is licensed under the MIT License 
 
-## 🆘 Support
-
-For questions and support:
-- Check the implementation-specific README files
-- Review CloudWatch logs for debugging
-- Consult AWS documentation for service-specific issues
-
 ---
 
 **Choose Your Implementation:**
@@ -186,3 +179,4 @@ For questions and support:
 - **Strands Agents** for natural language agent collaboration with maximum flexibility
 
 All three approaches provide identical functionality with different architectural patterns!
+Read my full article [here](https://dev.to/aws-builders/three-ways-to-build-multi-agent-systems-on-aws-3h8p)
