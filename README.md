@@ -10,8 +10,11 @@ A workflow-based approach using AWS Step Functions to orchestrate multiple speci
 ### Bedrock Agent Implementation (`bedrock-agent/`)
 A multi-agent AI approach using Amazon Bedrock Agents with collaborative AI agents that work together to provide comprehensive resume evaluations.
 
-### Strands Multi-Agent Implementation (`strands-agent/`)
+### Strands Multi-Agent Implementation (`strands-lambda-agent/`)
 A natural collaboration approach using Strands Agents SDK where specialized agents communicate in natural language to provide adaptive, comprehensive resume evaluations.
+
+### Strands AgentCore Implementation (`strands-agentcore-agent/`)
+An enterprise-grade approach using Amazon Bedrock AgentCore Runtime to host Strands agents with enhanced security, observability, and scalability features.
 
 ## 🚀 Key Features
 
@@ -76,13 +79,20 @@ hr-agents/
 │   ├── template-lambda.yaml    # Lambda functions template
 │   ├── deploy.sh               # Automated deployment script
 │   └── functions/              # Lambda function code
-├── strands-agent/              # Strands Agent implementation
+├── strands-lambda-agent/         # Strands Agent implementation
 │   ├── README.md               # Strands Agent specific documentation
 │   ├── template-infrastructure.yaml # Infrastructure resources (S3, DynamoDB)
 │   ├── template-lambda.yaml    # Lambda functions and layer template
 │   ├── deploy.sh               # Automated deployment script
 │   ├── create_lambda_package.py # Lambda packaging with proper layer structure
 │   └── functions/              # Lambda function code
+├── strands-agentcore-agent/    # Strands AgentCore implementation
+│   ├── README.md               # Strands AgentCore specific documentation
+│   ├── template-infrastructure.yaml # Infrastructure resources
+│   ├── hr_agent.py             # Main AgentCore agent code
+│   ├── s3_processor.py         # S3 event processor Lambda
+│   ├── deploy.sh               # Automated deployment script
+│   └── requirements.txt        # Python dependencies
 └── samples/                    # Sample data for testing
     ├── jobs/                   # Sample job descriptions
     └── resumes/                # Sample resumes
@@ -108,7 +118,14 @@ cd bedrock-agent
 ### Strands Agent Implementation
 
 ```bash
-cd strands-agent
+cd strands-lambda-agent
+./deploy.sh
+```
+
+### Strands AgentCore Implementation
+
+```bash
+cd strands-agentcore-agent
 ./deploy.sh
 ```
 
@@ -129,7 +146,7 @@ cd strands-agent
 
 ## 📊 Sample Output
 
-Both implementations produce structured evaluation data including:
+All four implementations produce structured evaluation data including:
 
 - **Candidate Information** - Name, contact details, resume summary
 - **Skills Assessment** - Programming languages, frameworks, tools
@@ -176,7 +193,8 @@ This project is licensed under the MIT License
 **Choose Your Implementation:**
 - **Step Functions** for complex workflows with detailed monitoring
 - **Bedrock Agents** for AI-native multi-agent collaboration
-- **Strands Agents** for natural language agent collaboration with maximum flexibility
+- **Strands Lambda** for natural language agent collaboration with maximum flexibility
+- **Strands AgentCore** for enterprise-grade agent hosting with enhanced security and observability
 
-All three approaches provide identical functionality with different architectural patterns!
+All four approaches provide identical functionality with different architectural patterns!
 Read my full article [here](https://dev.to/aws-builders/three-ways-to-build-multi-agent-systems-on-aws-3h8p)

@@ -1,0 +1,109 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: 'HR Agents - Strands AgentCore Implementation - Lambda Function'
+
+Parameters:
+  Environment:
+    Type: String
+    Default: 'agentcore'
+    Description: Environment name for resource naming
+  
+  AgentArn:
+    Type: String
+    Description: AgentCore agent ARN
+    Default: 'arn:aws:bedrock-agentcore:us-east-1:479047237979:runtime/hr_agent_agentcore-UqTEBsAURx'
+
+Resources:
+  # IAM Role for S3 Processor Lambda
+  S3ProcessorRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'hr-agents-s3-processor-role-${Environment}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: AgentCoreAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock-agentcore:InvokeAgentRuntime
+                Resource: '*'
+
+  # Lambda function for S3 event processing
+  S3ProcessorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'hr-agents-s3-processor-${Environment}'
+      InlineCode: |
+        import json
+        import logging
+        import os
+        import uuid
+        import boto3
+        from botocore.config import Config
+
+        logger = logging.getLogger()
+        logger.setLevel(logging.INFO)
+
+        # Configure AgentCore client with extended timeout
+        config = Config(
+            read_timeout=900,  # 15 minutes
+            connect_timeout=60,
+            retries={'max_attempts': 3}
+        )
+        agentcore_client = boto3.client('bedrock-agentcore', config=config)
+        AGENT_ARN = os.environ['AGENT_ARN']
+
+        def lambda_handler(event, context):
+            try:
+                logger.info(f"Processing S3 event: {event}")
+                
+                for record in event['Records']:
+                    bucket = record['s3']['bucket']['name']
+                    key = record['s3']['object']['key']
+                    
+                    if not key.startswith('resumes/'):
+                        logger.info(f"Skipping non-resume file: {key}")
+                        continue
+                    
+                    candidate_id = str(uuid.uuid4())
+                    payload = {
+                        "bucket": bucket,
+                        "resume_key": key,
+                        "candidate_id": candidate_id
+                    }
+                    
+                    response = agentcore_client.invoke_agent_runtime(
+                        agentRuntimeArn=AGENT_ARN,
+                        payload=json.dumps(payload),
+                        runtimeSessionId=str(uuid.uuid4())
+                    )
+                    
+                    logger.info(f"AgentCore processing completed: {response}")
+                
+                return {'statusCode': 200, 'body': json.dumps({'message': 'Success'})}
+                
+            except Exception as e:
+                logger.error(f"Error: {str(e)}")
+                return {'statusCode': 500, 'body': json.dumps({'error': str(e)})}
+      Handler: index.lambda_handler
+      Runtime: python3.11
+      Timeout: 900
+      Role: !GetAtt S3ProcessorRole.Arn
+      Environment:
+        Variables:
+          AGENT_ARN: !Ref AgentArn
+
+Outputs:
+  S3ProcessorFunction:
+    Description: 'Lambda function for S3 event processing'
+    Value: !Ref S3ProcessorFunction
