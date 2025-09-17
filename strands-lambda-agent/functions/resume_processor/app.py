@@ -22,7 +22,7 @@ dynamodb = boto3.resource('dynamodb')
 # Environment variables
 CANDIDATES_TABLE = os.environ['CANDIDATES_TABLE']
 DOCUMENTS_BUCKET = os.environ['DOCUMENTS_BUCKET']
-MODEL_ID = os.environ.get('MODEL_ID', 'us.anthropic.claude-3-7-sonnet-20250219-v1:0')
+MODEL_ID = os.environ.get('MODEL_ID', 'us.amazon.nova-pro-v1:0')
 
 # DynamoDB table
 candidates_table = dynamodb.Table(CANDIDATES_TABLE)

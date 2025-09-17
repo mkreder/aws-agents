@@ -11,7 +11,7 @@ logger.setLevel(os.environ.get('LOG_LEVEL', 'INFO'))
 bedrock_runtime = boto3.client('bedrock-runtime')
 
 # Model ID for Claude (or another appropriate model)
-MODEL_ID = "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
+MODEL_ID = "us.amazon.nova-pro-v1:0"
 
 def lambda_handler(event, context):
     """

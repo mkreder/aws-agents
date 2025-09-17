@@ -16,7 +16,7 @@ jobs_table = dynamodb.Table(os.environ.get('JOBS_TABLE'))
 bedrock_runtime = boto3.client('bedrock-runtime')
 
 # Model configuration
-MODEL_ID = "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
+MODEL_ID = "us.amazon.nova-pro-v1:0"
 
 def lambda_handler(event, context):
     """

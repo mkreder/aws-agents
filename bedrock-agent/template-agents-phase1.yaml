@@ -10,8 +10,8 @@ Parameters:
   
   BedrockModelId:
     Type: String
-    Default: us.anthropic.claude-3-7-sonnet-20250219-v1:0
-    Description: Amazon Bedrock inference profile ID for Claude 3.7 Sonnet
+    Default: us.amazon.nova-pro-v1:0
+    Description: Amazon Bedrock model ID for Nova Pro
 
 Resources:
   # DynamoDB Tables
