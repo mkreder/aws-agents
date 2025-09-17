@@ -15,7 +15,7 @@ s3_client = boto3.client('s3')
 dynamodb = boto3.resource('dynamodb')
 
 # Environment variables
-MODEL_ID = os.environ.get('MODEL_ID', 'us.anthropic.claude-3-5-sonnet-20241022-v2:0')
+MODEL_ID = os.environ.get('MODEL_ID', 'us.amazon.nova-pro-v1:0')
 CANDIDATES_TABLE = os.environ.get('CANDIDATES_TABLE', 'hr-agents-candidates-agentcore')
 DOCUMENTS_BUCKET = os.environ.get('DOCUMENTS_BUCKET', 'hr-agents-documents-agentcore')
 
@@ -348,27 +348,40 @@ def safe_extract_content(result) -> str:
                         return str(content)
                 else:
                     return str(message)
+            # Handle direct text content
+            elif isinstance(result, str):
+                return result
             return str(result)
         else:
             return str(result)
     except Exception as e:
         logger.error(f"Error extracting content: {str(e)}")
+        logger.debug(f"Result type: {type(result)}, Result: {str(result)[:500]}")
         return str(result)
 
 def parse_evaluation_result(evaluation_result, candidate_id: str, resume_key: str, resume_content: str) -> Dict[str, Any]:
     """Parse the evaluation result into structured format"""
     try:
         from datetime import datetime
-        
+
         evaluation_content = safe_extract_content(evaluation_result)
         evaluation_json = safe_parse_json(evaluation_content)
-        
+
         candidate_name = extract_name_from_key(resume_key)
-        
+
         if evaluation_json and isinstance(evaluation_json, dict):
+            # Extract candidate name from parsed data if available
             if "resume_parsing" in evaluation_json and "personal_info" in evaluation_json["resume_parsing"]:
-                candidate_name = evaluation_json["resume_parsing"]["personal_info"].get("name", candidate_name)
-            
+                parsed_name = evaluation_json["resume_parsing"]["personal_info"].get("name")
+                if parsed_name and parsed_name.strip():
+                    candidate_name = parsed_name
+
+            # Extract individual rating for easy querying
+            rating = None
+            if "candidate_rating" in evaluation_json and isinstance(evaluation_json["candidate_rating"], dict):
+                rating = evaluation_json["candidate_rating"].get("rating")
+
+            # Build result matching other agents' structure
             result = {
                 "id": candidate_id,
                 "resume_key": resume_key,
@@ -378,41 +391,48 @@ def parse_evaluation_result(evaluation_result, candidate_id: str, resume_key: st
                 "completed_at": datetime.utcnow().isoformat(),
                 "evaluated_by": "Strands AgentCore Multi-Agent System",
                 "resume_text": resume_content,
-                
-                # Store individual components as separate attributes
+
+                # Store individual components as separate attributes (matching other agents)
                 "resume_parsing": evaluation_json.get("resume_parsing", {}),
                 "job_analysis": evaluation_json.get("job_analysis", {}),
                 "evaluation_results": evaluation_json.get("resume_evaluation", {}),
                 "gaps_analysis": evaluation_json.get("gap_analysis", {}),
                 "candidate_rating": evaluation_json.get("candidate_rating", {}),
                 "interview_notes": evaluation_json.get("interview_notes", {}),
-                
-                # Keep metadata for debugging
+
+                # Additional fields for compatibility and querying
+                "job_title": "AI Engineer",  # Default job title like other agents
+                "rating": rating,  # Extract numeric rating for easy filtering
+
+                # Keep minimal metadata for debugging (reduced size)
                 "agentcore_metadata": {
                     "runtime_platform": "Amazon Bedrock AgentCore",
                     "agent_framework": "Strands Agents SDK",
                     "model_used": MODEL_ID,
-                    "raw_response": evaluation_content[:1000]  # Truncated for storage
+                    "processing_timestamp": datetime.utcnow().isoformat()
                 }
             }
-            
+
             return result
         else:
-            # Fallback structure
+            # Fallback structure when JSON parsing fails
+            logger.warning(f"Could not parse evaluation JSON, storing as fallback structure")
             return {
                 "id": candidate_id,
                 "resume_key": resume_key,
                 "name": candidate_name,
                 "status": "completed",
                 "created_at": datetime.utcnow().isoformat(),
-                "evaluated_by": "Strands AgentCore Multi-Agent System",
+                "evaluated_by": "Strands AgentCore Multi-Agent System (Parsing Issue)",
                 "resume_text": resume_content,
+                "job_title": "AI Engineer",
                 "agentcore_metadata": {
                     "runtime_platform": "Amazon Bedrock AgentCore",
-                    "evaluation_content": evaluation_content
+                    "evaluation_content": evaluation_content[:2000],  # Store raw content for manual review
+                    "parsing_failed": True
                 }
             }
-        
+
     except Exception as e:
         logger.error(f"Error parsing evaluation: {str(e)}")
         return {
@@ -429,31 +449,32 @@ def safe_parse_json(content: str) -> Dict[str, Any]:
     """Safely parse JSON from text content"""
     try:
         content = content.strip()
-        
+
         # Handle escaped JSON strings first
         if '\\\"' in content:
             content = content.replace('\\\"', '"').replace('\\n', '\n').replace('\\\\', '\\')
-        
-        if content.startswith('{'):
+
+        # Try direct JSON parsing first
+        if content.startswith('{') and content.endswith('}'):
             return json.loads(content)
-        
+
         # Look for JSON in markdown code blocks
         import re
         json_pattern = r'```(?:json)?\s*(\{.*?\})\s*```'
         json_match = re.search(json_pattern, content, re.DOTALL | re.IGNORECASE)
-        
+
         if json_match:
             json_text = json_match.group(1).strip()
             if '\\\"' in json_text:
                 json_text = json_text.replace('\\\"', '"').replace('\\n', '\n')
             return json.loads(json_text)
-        
-        # Look for JSON structure anywhere
+
+        # Look for JSON structure anywhere in the content
         start_idx = content.find('{')
         if start_idx != -1:
             brace_count = 0
             end_idx = start_idx
-            
+
             for i in range(start_idx, len(content)):
                 if content[i] == '{':
                     brace_count += 1
@@ -462,17 +483,27 @@ def safe_parse_json(content: str) -> Dict[str, Any]:
                     if brace_count == 0:
                         end_idx = i + 1
                         break
-            
+
             if brace_count == 0:
                 json_text = content[start_idx:end_idx]
                 if '\\\"' in json_text:
                     json_text = json_text.replace('\\\"', '"').replace('\\n', '\n')
-                return json.loads(json_text)
-        
+                try:
+                    return json.loads(json_text)
+                except json.JSONDecodeError:
+                    # Try cleaning up common formatting issues
+                    json_text = json_text.replace('\n', ' ').replace('\t', ' ')
+                    # Remove extra spaces
+                    json_text = re.sub(r'\s+', ' ', json_text)
+                    return json.loads(json_text)
+
+        # Log the content for debugging if no JSON found
+        logger.warning(f"No valid JSON structure found in content: {content[:200]}...")
         return None
-        
+
     except Exception as e:
         logger.error(f"JSON parsing error: {str(e)}")
+        logger.debug(f"Content that failed to parse: {content[:500]}")
         return None
 
 def download_s3_file(bucket: str, key: str) -> str:
