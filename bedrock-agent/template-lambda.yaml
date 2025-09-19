@@ -41,13 +41,13 @@ Resources:
       Timeout: 300
       Environment:
         Variables:
-          SUPERVISOR_AGENT_ID: 
-            Fn::ImportValue: "bedrock-agent-supervisor-agent-id"
+          SUPERVISOR_AGENT_ID:
+            Fn::ImportValue: !Sub "${AgentsStackName}-supervisor-agent-id"
           SUPERVISOR_AGENT_ALIAS_ID:
-            Fn::ImportValue: "bedrock-agent-supervisor-agent-alias-id"
+            Fn::ImportValue: !Sub "${AgentsStackName}-supervisor-agent-alias-id"
           DOCUMENTS_BUCKET: !Sub "${AgentsStackName}-documents-${Environment}"
           CANDIDATES_TABLE:
-            Fn::ImportValue: "bedrock-agent-candidates-table"
+            Fn::ImportValue: !Sub "${AgentsStackName}-candidates-table"
       Policies:
         - S3ReadPolicy:
             BucketName: !Sub "${AgentsStackName}-documents-${Environment}"
@@ -61,8 +61,8 @@ Resources:
                 - dynamodb:PutItem
                 - dynamodb:GetItem
                 - dynamodb:UpdateItem
-              Resource: 
-                Fn::ImportValue: "bedrock-agent-candidates-table-arn"
+              Resource:
+                Fn::ImportValue: !Sub "${AgentsStackName}-candidates-table-arn"
 
   ResumeProcessorPermission:
     Type: AWS::Lambda::Permission

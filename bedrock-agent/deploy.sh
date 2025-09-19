@@ -74,11 +74,27 @@ CANDIDATE_RATER_AGENT_ID=$(aws cloudformation describe-stacks \
     --query 'Stacks[0].Outputs[?OutputKey==`CandidateRaterAgentId`].OutputValue' \
     --output text)
 
+GAP_IDENTIFIER_AGENT_ID=$(aws cloudformation describe-stacks \
+    --stack-name bedrock-agent \
+    --region $REGION \
+    --profile $PROFILE \
+    --query 'Stacks[0].Outputs[?OutputKey==`GapIdentifierAgentId`].OutputValue' \
+    --output text)
+
+INTERVIEW_NOTES_AGENT_ID=$(aws cloudformation describe-stacks \
+    --stack-name bedrock-agent \
+    --region $REGION \
+    --profile $PROFILE \
+    --query 'Stacks[0].Outputs[?OutputKey==`InterviewNotesAgentId`].OutputValue' \
+    --output text)
+
 echo "Supervisor Agent ID: $SUPERVISOR_AGENT_ID"
 echo "Resume Parser Agent ID: $RESUME_PARSER_AGENT_ID"
 echo "Job Analyzer Agent ID: $JOB_ANALYZER_AGENT_ID"
 echo "Resume Evaluator Agent ID: $RESUME_EVALUATOR_AGENT_ID"
 echo "Candidate Rater Agent ID: $CANDIDATE_RATER_AGENT_ID"
+echo "Gap Identifier Agent ID: $GAP_IDENTIFIER_AGENT_ID"
+echo "Interview Notes Agent ID: $INTERVIEW_NOTES_AGENT_ID"
 echo ""
 
 # Phase 2: Configure Multi-Agent Collaboration
@@ -89,7 +105,7 @@ echo "📝 Updating Supervisor Agent to enable collaboration..."
 aws bedrock-agent update-agent \
     --agent-id $SUPERVISOR_AGENT_ID \
     --agent-name "bedrock-agent-supervisor-$ENVIRONMENT" \
-    --foundation-model "amazon.nova-pro-v1:0" \
+    --foundation-model "us.anthropic.claude-3-7-sonnet-20250219-v1:0" \
     --agent-collaboration "SUPERVISOR_ROUTER" \
     --agent-resource-role-arn "arn:aws:iam::$(aws sts get-caller-identity --profile $PROFILE --query Account --output text):role/bedrock-agent-BedrockAgentRole" \
     --instruction "You are the Supervisor Agent for HR resume evaluation. You coordinate with specialized collaborator agents to provide comprehensive candidate evaluations.
@@ -106,6 +122,8 @@ You have access to these collaborator agents:
 - JobAnalyzerAgent: Analyzes job descriptions and requirements
 - ResumeEvaluatorAgent: Evaluates candidate fit against job requirements
 - CandidateRaterAgent: Provides numerical ratings with justification
+- GapIdentifierAgent: Identifies gaps and inconsistencies in resumes
+- InterviewNotesAgent: Generates interview preparation materials
 
 ALWAYS delegate specific tasks to the appropriate collaborator agents using AgentCommunication__sendMessage. Do NOT attempt to do the specialized work yourself. Your role is to orchestrate the workflow and compile the final comprehensive report." \
     --region $REGION \
@@ -130,11 +148,15 @@ RESUME_PARSER_ALIAS_ID=$(get_dev_alias_id $RESUME_PARSER_AGENT_ID)
 JOB_ANALYZER_ALIAS_ID=$(get_dev_alias_id $JOB_ANALYZER_AGENT_ID)
 RESUME_EVALUATOR_ALIAS_ID=$(get_dev_alias_id $RESUME_EVALUATOR_AGENT_ID)
 CANDIDATE_RATER_ALIAS_ID=$(get_dev_alias_id $CANDIDATE_RATER_AGENT_ID)
+GAP_IDENTIFIER_ALIAS_ID=$(get_dev_alias_id $GAP_IDENTIFIER_AGENT_ID)
+INTERVIEW_NOTES_ALIAS_ID=$(get_dev_alias_id $INTERVIEW_NOTES_AGENT_ID)
 
 echo "Resume Parser Alias ID: $RESUME_PARSER_ALIAS_ID"
 echo "Job Analyzer Alias ID: $JOB_ANALYZER_ALIAS_ID"
 echo "Resume Evaluator Alias ID: $RESUME_EVALUATOR_ALIAS_ID"
 echo "Candidate Rater Alias ID: $CANDIDATE_RATER_ALIAS_ID"
+echo "Gap Identifier Alias ID: $GAP_IDENTIFIER_ALIAS_ID"
+echo "Interview Notes Alias ID: $INTERVIEW_NOTES_ALIAS_ID"
 echo ""
 
 # Associate collaborator agents with supervisor
@@ -177,6 +199,26 @@ aws bedrock-agent associate-agent-collaborator \
     --collaborator-name "CandidateRaterAgent" \
     --collaboration-instruction "Provide numerical ratings (1-5 scale) for candidates based on their qualifications, experience, and fit for the role with detailed justification." \
     --agent-descriptor aliasArn="arn:aws:bedrock:$REGION:$(aws sts get-caller-identity --profile $PROFILE --query Account --output text):agent-alias/$CANDIDATE_RATER_AGENT_ID/$CANDIDATE_RATER_ALIAS_ID" \
+    --region $REGION \
+    --profile $PROFILE
+
+# Gap Identifier Agent
+aws bedrock-agent associate-agent-collaborator \
+    --agent-id $SUPERVISOR_AGENT_ID \
+    --agent-version DRAFT \
+    --collaborator-name "GapIdentifierAgent" \
+    --collaboration-instruction "Identify gaps and inconsistencies in resumes. Return JSON with employment gaps, job stability analysis, skill mismatches, concerns." \
+    --agent-descriptor aliasArn="arn:aws:bedrock:$REGION:$(aws sts get-caller-identity --profile $PROFILE --query Account --output text):agent-alias/$GAP_IDENTIFIER_AGENT_ID/$GAP_IDENTIFIER_ALIAS_ID" \
+    --region $REGION \
+    --profile $PROFILE
+
+# Interview Notes Agent
+aws bedrock-agent associate-agent-collaborator \
+    --agent-id $SUPERVISOR_AGENT_ID \
+    --agent-version DRAFT \
+    --collaborator-name "InterviewNotesAgent" \
+    --collaboration-instruction "Generate interview preparation materials and notes. Return JSON with technical questions, experience questions, concerns to address, key areas to probe." \
+    --agent-descriptor aliasArn="arn:aws:bedrock:$REGION:$(aws sts get-caller-identity --profile $PROFILE --query Account --output text):agent-alias/$INTERVIEW_NOTES_AGENT_ID/$INTERVIEW_NOTES_ALIAS_ID" \
     --region $REGION \
     --profile $PROFILE
 

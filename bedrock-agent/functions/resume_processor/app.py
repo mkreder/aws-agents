@@ -111,7 +111,11 @@ def process_resume(bucket, resume_key):
     # Use the Supervisor Agent for multi-agent coordination
     agent_id = os.environ.get('SUPERVISOR_AGENT_ID')
     agent_alias_id = os.environ.get('SUPERVISOR_AGENT_ALIAS_ID')
-    
+
+    logger.info(f"🔧 Environment Variables Debug:")
+    logger.info(f"   SUPERVISOR_AGENT_ID: {agent_id}")
+    logger.info(f"   SUPERVISOR_AGENT_ALIAS_ID: {agent_alias_id}")
+
     if not agent_id or not agent_alias_id:
         raise ValueError("Missing agent configuration")
     
@@ -188,14 +192,23 @@ def save_evaluation_to_db(candidate_id, candidate_name, resume_key, resume_text,
     
     # Parse the evaluation response to extract structured components
     evaluation_data = parse_evaluation_response(evaluation_response)
-    
+
+    # Determine status based on whether evaluation succeeded or failed
+    is_error = (evaluation_response.startswith('Error:') or
+                'error occurred' in evaluation_response.lower() or
+                'not available' in evaluation_response.lower() or
+                'unable to assist' in evaluation_response.lower() or
+                evaluation_data.get('evaluation_results', {}).get('status') == 'failed')
+
+    status = 'failed' if is_error else 'completed'
+
     # Create comprehensive candidate record
     candidate_item = {
         'id': candidate_id,
         'name': candidate_name,
         'resume_key': resume_key,
         'resume_text': resume_text,
-        'status': 'completed',
+        'status': status,
         'evaluation_results': evaluation_data.get('evaluation_results', {}),
         'gaps_analysis': evaluation_data.get('gaps_analysis', {}),
         'candidate_rating': evaluation_data.get('candidate_rating', {}),
@@ -213,6 +226,21 @@ def parse_evaluation_response(evaluation_response):
     """
     Parse the multi-agent evaluation response into structured components.
     """
+    # Check if response is an error message
+    is_error = (evaluation_response.startswith('Error:') or
+                'error occurred' in evaluation_response.lower() or
+                'not available' in evaluation_response.lower() or
+                'unable to assist' in evaluation_response.lower())
+
+    # Log detection for debugging
+    logger.info(f"🔍 ERROR DETECTION DEBUG:")
+    logger.info(f"   Response: {evaluation_response[:100]}...")
+    logger.info(f"   Is error detected: {is_error}")
+
+    if is_error:
+        logger.info(f"🚨 Creating error response for: {evaluation_response}")
+        return create_error_response(evaluation_response)
+
     try:
         # Try to parse as JSON first
         if evaluation_response.strip().startswith('{'):
@@ -220,7 +248,7 @@ def parse_evaluation_response(evaluation_response):
             return extract_structured_components(evaluation_json, evaluation_response)
     except json.JSONDecodeError:
         pass
-    
+
     # If not JSON, create structured data from text response
     return create_structured_from_text(evaluation_response)
 
@@ -464,6 +492,88 @@ def create_structured_from_text(evaluation_response):
             'raw_notes': evaluation_response
         }
     }
+
+def create_error_response(error_message):
+    """
+    Create a minimal error response structure when agent evaluation fails.
+    """
+    logger.info(f"✅ create_error_response called with: {error_message}")
+
+    error_response = {
+        'evaluation_results': {
+            'error': error_message,
+            'status': 'failed',
+            'skills_summary': {
+                'programming_languages': [],
+                'ml_frameworks': [],
+                'cloud_platforms': [],
+                'tools': [],
+                'databases': [],
+                'big_data': []
+            },
+            'technical_expertise': {
+                'depth': f'Evaluation failed: {error_message}',
+                'examples': []
+            },
+            'experience_summary': {
+                'years_of_experience': 'Unable to determine due to evaluation failure',
+                'relevant_roles': [],
+                'key_achievements': []
+            },
+            'job_match_analysis': {
+                'skills_match': f'Unable to assess: {error_message}',
+                'experience_relevance': f'Unable to assess: {error_message}',
+                'education_fit': f'Unable to assess: {error_message}',
+                'project_relevance': f'Unable to assess: {error_message}',
+                'technical_depth': f'Unable to assess: {error_message}',
+                'problem_solving': f'Unable to assess: {error_message}'
+            },
+            'education_summary': {
+                'degree': 'Unable to determine due to evaluation failure',
+                'institution': 'Unable to determine due to evaluation failure',
+                'alignment': 'Unable to determine due to evaluation failure'
+            },
+            'raw_evaluation': error_message
+        },
+        'gaps_analysis': {
+            'gaps_analysis': {
+                'skill_mismatches': {
+                    'analysis': f'Unable to analyze: {error_message}',
+                    'clarification_needed': 'Retry evaluation when system is available'
+                },
+                'experience_gaps': {
+                    'analysis': f'Unable to analyze: {error_message}',
+                    'clarification_needed': 'Retry evaluation when system is available'
+                },
+                'overall_concerns': {
+                    'missing_information': 'Evaluation failed - unable to extract information',
+                    'areas_for_improvement': 'Retry evaluation when system is available'
+                }
+            }
+        },
+        'candidate_rating': {
+            'rating': 0,
+            'reasoning': f'Unable to rate candidate due to evaluation failure: {error_message}',
+            'strengths': [],
+            'weaknesses': ['Evaluation system failure prevented assessment'],
+            'job_fit': f'Unable to assess: {error_message}',
+            'raw_rating': error_message
+        },
+        'interview_notes': {
+            'technical_questions': ['Unable to generate questions due to evaluation failure'],
+            'experience_questions': ['Unable to generate questions due to evaluation failure'],
+            'skill_verification': ['Unable to generate verification steps due to evaluation failure'],
+            'concerns_to_address': ['Retry evaluation when system is available'],
+            'general_notes': {
+                'strengths_to_explore': [],
+                'follow_up_actions': ['Retry evaluation when multi-agent system is available']
+            },
+            'raw_notes': error_message
+        }
+    }
+
+    logger.info(f"✅ Error response structure created with status: {error_response.get('evaluation_results', {}).get('status', 'unknown')}")
+    return error_response
 
 def create_initial_candidate_record(candidate_id, candidate_name, resume_key, resume_text):
     """
