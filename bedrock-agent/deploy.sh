@@ -21,7 +21,7 @@ echo ""
 echo "📦 PHASE 1: Deploying Bedrock Agents..."
 sam deploy \
     --template-file template-agents-phase1.yaml \
-    --stack-name bedrock-agent \
+    --stack-name bedrock-agents \
     --region $REGION \
     --profile $PROFILE \
     --capabilities CAPABILITY_NAMED_IAM \
@@ -40,49 +40,49 @@ echo ""
 # Get agent IDs from the stack outputs
 echo "📋 Getting agent IDs from stack outputs..."
 SUPERVISOR_AGENT_ID=$(aws cloudformation describe-stacks \
-    --stack-name bedrock-agent \
+    --stack-name bedrock-agents \
     --region $REGION \
     --profile $PROFILE \
     --query 'Stacks[0].Outputs[?OutputKey==`SupervisorAgentId`].OutputValue' \
     --output text)
 
 RESUME_PARSER_AGENT_ID=$(aws cloudformation describe-stacks \
-    --stack-name bedrock-agent \
+    --stack-name bedrock-agents \
     --region $REGION \
     --profile $PROFILE \
     --query 'Stacks[0].Outputs[?OutputKey==`ResumeParserAgentId`].OutputValue' \
     --output text)
 
 JOB_ANALYZER_AGENT_ID=$(aws cloudformation describe-stacks \
-    --stack-name bedrock-agent \
+    --stack-name bedrock-agents \
     --region $REGION \
     --profile $PROFILE \
     --query 'Stacks[0].Outputs[?OutputKey==`JobAnalyzerAgentId`].OutputValue' \
     --output text)
 
 RESUME_EVALUATOR_AGENT_ID=$(aws cloudformation describe-stacks \
-    --stack-name bedrock-agent \
+    --stack-name bedrock-agents \
     --region $REGION \
     --profile $PROFILE \
     --query 'Stacks[0].Outputs[?OutputKey==`ResumeEvaluatorAgentId`].OutputValue' \
     --output text)
 
 CANDIDATE_RATER_AGENT_ID=$(aws cloudformation describe-stacks \
-    --stack-name bedrock-agent \
+    --stack-name bedrock-agents \
     --region $REGION \
     --profile $PROFILE \
     --query 'Stacks[0].Outputs[?OutputKey==`CandidateRaterAgentId`].OutputValue' \
     --output text)
 
 GAP_IDENTIFIER_AGENT_ID=$(aws cloudformation describe-stacks \
-    --stack-name bedrock-agent \
+    --stack-name bedrock-agents \
     --region $REGION \
     --profile $PROFILE \
     --query 'Stacks[0].Outputs[?OutputKey==`GapIdentifierAgentId`].OutputValue' \
     --output text)
 
 INTERVIEW_NOTES_AGENT_ID=$(aws cloudformation describe-stacks \
-    --stack-name bedrock-agent \
+    --stack-name bedrock-agents \
     --region $REGION \
     --profile $PROFILE \
     --query 'Stacks[0].Outputs[?OutputKey==`InterviewNotesAgentId`].OutputValue' \
@@ -104,10 +104,10 @@ echo "🤝 PHASE 2: Configuring Multi-Agent Collaboration..."
 echo "📝 Updating Supervisor Agent to enable collaboration..."
 aws bedrock-agent update-agent \
     --agent-id $SUPERVISOR_AGENT_ID \
-    --agent-name "bedrock-agent-supervisor-$ENVIRONMENT" \
+    --agent-name "bedrock-agents-supervisor-$ENVIRONMENT" \
     --foundation-model "us.anthropic.claude-3-7-sonnet-20250219-v1:0" \
     --agent-collaboration "SUPERVISOR_ROUTER" \
-    --agent-resource-role-arn "arn:aws:iam::$(aws sts get-caller-identity --profile $PROFILE --query Account --output text):role/bedrock-agent-BedrockAgentRole" \
+    --agent-resource-role-arn "arn:aws:iam::$(aws sts get-caller-identity --profile $PROFILE --query Account --output text):role/bedrock-agents-BedrockAgentRole" \
     --instruction "You are the Supervisor Agent for HR resume evaluation. You coordinate with specialized collaborator agents to provide comprehensive candidate evaluations.
 
 When a user requests resume evaluation, you MUST follow this workflow:
@@ -243,11 +243,11 @@ sleep 30
 echo "📦 PHASE 3: Deploying Lambda Functions..."
 sam deploy \
     --template-file template-lambda.yaml \
-    --stack-name bedrock-agent-lambda \
+    --stack-name bedrock-agents-lambda \
     --region $REGION \
     --profile $PROFILE \
     --capabilities CAPABILITY_IAM \
-    --parameter-overrides Environment=$ENVIRONMENT AgentsStackName=bedrock-agent \
+    --parameter-overrides Environment=$ENVIRONMENT AgentsStackName=bedrock-agents \
     --resolve-s3 \
     --no-confirm-changeset
 
@@ -261,7 +261,7 @@ echo ""
 
 # Phase 4: Upload Sample Data
 echo "📄 PHASE 4: Uploading Sample Data..."
-python upload_samples.py --stack-name bedrock-agent-lambda
+python upload_samples.py --stack-name bedrock-agents-lambda
 
 if [ $? -ne 0 ]; then
     echo "❌ Failed to upload sample data"
