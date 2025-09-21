@@ -15,7 +15,7 @@ s3_client = boto3.client('s3')
 dynamodb = boto3.resource('dynamodb')
 
 # Environment variables
-MODEL_ID = os.environ.get('MODEL_ID', 'us.amazon.nova-pro-v1:0')
+MODEL_ID = os.environ.get('MODEL_ID', 'us.anthropic.claude-3-5-sonnet-20241022-v2:0')
 CANDIDATES_TABLE = os.environ.get('CANDIDATES_TABLE', 'hr-agents-candidates-agentcore')
 DOCUMENTS_BUCKET = os.environ.get('DOCUMENTS_BUCKET', 'hr-agents-documents-agentcore')
 
@@ -365,6 +365,9 @@ def parse_evaluation_result(evaluation_result, candidate_id: str, resume_key: st
         from datetime import datetime
 
         evaluation_content = safe_extract_content(evaluation_result)
+        logger.info(f"🔍 Raw agent response type: {type(evaluation_result)}")
+        logger.info(f"🔍 Extracted content length: {len(evaluation_content)} chars")
+        logger.info(f"🔍 Content preview: {evaluation_content[:500]}...")
         evaluation_json = safe_parse_json(evaluation_content)
 
         candidate_name = extract_name_from_key(resume_key)
@@ -383,7 +386,7 @@ def parse_evaluation_result(evaluation_result, candidate_id: str, resume_key: st
 
             # Build result matching other agents' structure
             result = {
-                "id": candidate_id,
+                "id": candidate_name,
                 "resume_key": resume_key,
                 "name": candidate_name,
                 "status": "completed",
@@ -417,8 +420,10 @@ def parse_evaluation_result(evaluation_result, candidate_id: str, resume_key: st
         else:
             # Fallback structure when JSON parsing fails
             logger.warning(f"Could not parse evaluation JSON, storing as fallback structure")
+            logger.warning(f"Raw evaluation content (first 1000 chars): {evaluation_content[:1000]}")
+            logger.warning(f"Content type: {type(evaluation_content)}")
             return {
-                "id": candidate_id,
+                "id": candidate_name,
                 "resume_key": resume_key,
                 "name": candidate_name,
                 "status": "completed",
@@ -428,17 +433,18 @@ def parse_evaluation_result(evaluation_result, candidate_id: str, resume_key: st
                 "job_title": "AI Engineer",
                 "agentcore_metadata": {
                     "runtime_platform": "Amazon Bedrock AgentCore",
-                    "evaluation_content": evaluation_content[:2000],  # Store raw content for manual review
+                    "evaluation_content": evaluation_content,  # Store full content for debugging
                     "parsing_failed": True
                 }
             }
 
     except Exception as e:
         logger.error(f"Error parsing evaluation: {str(e)}")
+        candidate_name = extract_name_from_key(resume_key)
         return {
-            "id": candidate_id,
+            "id": candidate_name,
             "resume_key": resume_key,
-            "name": extract_name_from_key(resume_key),
+            "name": candidate_name,
             "status": "error",
             "error": f"Parsing error: {str(e)}",
             "created_at": datetime.utcnow().isoformat(),
@@ -450,12 +456,109 @@ def safe_parse_json(content: str) -> Dict[str, Any]:
     try:
         content = content.strip()
 
+        logger.info(f"🔍 Parsing JSON from content type: {type(content)}")
+        logger.info(f"🔍 Content starts with: {content[:100]}")
+
+        # Handle Python dict string representation: "{'role': 'assistant', 'content': [{'text': 'JSON_HERE'}]}"
+        if content.startswith("{'role': 'assistant', 'content': [{'text': '") and content.endswith("'}]}"):
+            logger.info("🔍 Detected Python dict string representation")
+            # Use regex to extract the JSON from the text field instead of ast.literal_eval
+            import re
+            try:
+                # Find the start of the text content after 'text': '
+                text_start_pattern = r"'text':\s*'"
+                text_start_match = re.search(text_start_pattern, content)
+                if text_start_match:
+                    start_pos = text_start_match.end()
+                    # Find the end by looking for the closing pattern '}]}
+                    # We need to work backwards from the end to handle escaped quotes
+                    end_pattern = r"'\s*\}\s*\]\s*\}\s*$"
+
+                    # Search for the end pattern
+                    end_match = re.search(end_pattern, content)
+                    if end_match:
+                        end_pos = end_match.start()
+                        # Extract the text content between start and end
+                        text_content = content[start_pos:end_pos]
+
+                        # Unescape the content - handle backslash escaping
+                        text_content = text_content.replace('\\\\', '\x00')  # Temporarily replace double backslash
+                        text_content = text_content.replace("\\'", "'").replace('\\n', '\n').replace('\\"', '"')
+                        text_content = text_content.replace('\x00', '\\')  # Restore single backslashes
+
+                        logger.info(f"🔍 Extracted text content length: {len(text_content)}")
+                        logger.info(f"🔍 Text content preview: {text_content[:200]}...")
+
+                        # Clean up the text content - remove thinking tags and find JSON
+                        if '<thinking>' in text_content and '</thinking>' in text_content:
+                            # Remove thinking sections
+                            text_content = re.sub(r'<thinking>.*?</thinking>\s*', '', text_content, flags=re.DOTALL)
+                            logger.info(f"🔍 Removed thinking tags, new length: {len(text_content)}")
+                            logger.info(f"🔍 Content after thinking removal: {text_content[:200]}...")
+
+                        # Clean up the text content more thoroughly
+                        text_content = text_content.strip()
+
+                        # Remove any leading/trailing whitespace and newlines
+                        while text_content.startswith(('\n', '\r', ' ', '\t')):
+                            text_content = text_content[1:]
+                        while text_content.endswith(('\n', '\r', ' ', '\t')):
+                            text_content = text_content[:-1]
+
+                        logger.info(f"🔍 Cleaned content starts with: '{text_content[:50]}...'")
+                        logger.info(f"🔍 Cleaned content ends with: '...{text_content[-50:]}'")
+
+                        # Find the JSON part
+                        if text_content.startswith('{') and text_content.endswith('}'):
+                            logger.info("🔍 Content looks like JSON, attempting to parse")
+                            try:
+                                return json.loads(text_content)
+                            except json.JSONDecodeError as e:
+                                logger.warning(f"🔍 JSON parse failed: {str(e)}")
+                                logger.warning(f"🔍 Failed content preview: '{text_content[:100]}...'")
+
+                        # Look for JSON structure in the content
+                        start_idx = text_content.find('{')
+                        if start_idx != -1:
+                            logger.info(f"🔍 Found JSON structure at position {start_idx}")
+                            brace_count = 0
+                            end_idx = start_idx
+
+                            for i in range(start_idx, len(text_content)):
+                                if text_content[i] == '{':
+                                    brace_count += 1
+                                elif text_content[i] == '}':
+                                    brace_count -= 1
+                                    if brace_count == 0:
+                                        end_idx = i + 1
+                                        break
+
+                            if brace_count == 0:
+                                json_text = text_content[start_idx:end_idx]
+                                logger.info(f"🔍 Extracted JSON substring length: {len(json_text)}")
+                                logger.info(f"🔍 JSON substring preview: '{json_text[:100]}...'")
+                                try:
+                                    return json.loads(json_text)
+                                except json.JSONDecodeError as e:
+                                    logger.warning(f"🔍 JSON substring parse failed: {str(e)}")
+
+                        # If we get here, try to parse as-is
+                        logger.info("🔍 Attempting final direct parse")
+                        return json.loads(text_content)
+                    else:
+                        logger.warning("🔍 Failed to find end pattern in content")
+                else:
+                    logger.warning("🔍 Failed to find text start pattern in content")
+            except Exception as e:
+                logger.warning(f"🔍 Failed to parse Python dict with improved regex: {str(e)}")
+
         # Handle escaped JSON strings first
         if '\\\"' in content:
             content = content.replace('\\\"', '"').replace('\\n', '\n').replace('\\\\', '\\')
 
         # Try direct JSON parsing first
         if content.startswith('{') and content.endswith('}'):
+            logger.info("🔍 Attempting direct JSON parsing")
             return json.loads(content)
 
         # Look for JSON in markdown code blocks
@@ -464,6 +567,7 @@ def safe_parse_json(content: str) -> Dict[str, Any]:
         json_match = re.search(json_pattern, content, re.DOTALL | re.IGNORECASE)
 
         if json_match:
+            logger.info("🔍 Found JSON in markdown code block")
             json_text = json_match.group(1).strip()
             if '\\\"' in json_text:
                 json_text = json_text.replace('\\\"', '"').replace('\\n', '\n')
@@ -472,6 +576,7 @@ def safe_parse_json(content: str) -> Dict[str, Any]:
         # Look for JSON structure anywhere in the content
         start_idx = content.find('{')
         if start_idx != -1:
+            logger.info(f"🔍 Found JSON structure starting at index {start_idx}")
             brace_count = 0
             end_idx = start_idx
 
@@ -486,11 +591,13 @@ def safe_parse_json(content: str) -> Dict[str, Any]:
 
             if brace_count == 0:
                 json_text = content[start_idx:end_idx]
+                logger.info(f"🔍 Extracted JSON text length: {len(json_text)}")
                 if '\\\"' in json_text:
                     json_text = json_text.replace('\\\"', '"').replace('\\n', '\n')
                 try:
                     return json.loads(json_text)
-                except json.JSONDecodeError:
+                except json.JSONDecodeError as e:
+                    logger.warning(f"🔍 JSON decode error: {str(e)}")
                     # Try cleaning up common formatting issues
                     json_text = json_text.replace('\n', ' ').replace('\t', ' ')
                     # Remove extra spaces
