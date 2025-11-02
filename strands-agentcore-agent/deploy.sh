@@ -80,8 +80,7 @@ agentcore configure \
     --name "hr_agent_${ENVIRONMENT}" \
     --region $REGION \
     --execution-role $EXECUTION_ROLE \
-    --ecr-repository-uri "" \
-    --non-interactive
+    --ecr "479047237979.dkr.ecr.us-east-1.amazonaws.com/hr-agent-agentcore"
 
 echo "✅ AgentCore configuration completed"
 

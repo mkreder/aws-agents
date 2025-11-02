@@ -11,7 +11,7 @@ Parameters:
   AgentArn:
     Type: String
     Description: AgentCore agent ARN
-    Default: 'arn:aws:bedrock-agentcore:us-east-1:479047237979:runtime/hr_agent_agentcore-UqTEBsAURx'
+    Default: 'arn:aws:bedrock-agentcore:us-east-1:479047237979:runtime/minimal-agent'
 
 Resources:
   # IAM Role for S3 Processor Lambda
@@ -82,11 +82,22 @@ Resources:
                         "candidate_id": candidate_id
                     }
                     
-                    response = agentcore_client.invoke_agent_runtime(
-                        agentRuntimeArn=AGENT_ARN,
-                        payload=json.dumps(payload),
-                        runtimeSessionId=str(uuid.uuid4())
-                    )
+                    # Try without qualifier first
+                    try:
+                        response = agentcore_client.invoke_agent_runtime(
+                            agentRuntimeArn=AGENT_ARN,
+                            payload=json.dumps(payload).encode('utf-8'),
+                            runtimeSessionId=str(uuid.uuid4())
+                        )
+                    except Exception as e:
+                        logger.error(f"Failed without qualifier: {str(e)}")
+                        # Try with LATEST qualifier
+                        response = agentcore_client.invoke_agent_runtime(
+                            agentRuntimeArn=AGENT_ARN,
+                            payload=json.dumps(payload).encode('utf-8'),
+                            runtimeSessionId=str(uuid.uuid4()),
+                            qualifier="LATEST"
+                        )
                     
                     logger.info(f"AgentCore processing completed: {response}")
                 

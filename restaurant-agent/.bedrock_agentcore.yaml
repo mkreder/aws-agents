@@ -1,0 +1,30 @@
+default_agent: restaurant_agent
+agents:
+  restaurant_agent:
+    name: restaurant_agent
+    entrypoint: restaurant_agent.py
+    platform: linux/arm64
+    container_runtime: docker
+    aws:
+      execution_role: arn:aws:iam::479047237979:role/AmazonBedrockAgentCoreSDKRuntime-us-east-1-9949d4f62f
+      execution_role_auto_create: false
+      account: '479047237979'
+      region: us-east-1
+      ecr_repository: 479047237979.dkr.ecr.us-east-1.amazonaws.com/bedrock-agentcore-restaurant_agent
+      ecr_auto_create: false
+      network_configuration:
+        network_mode: PUBLIC
+      protocol_configuration:
+        server_protocol: HTTP
+      observability:
+        enabled: true
+    bedrock_agentcore:
+      agent_id: restaurant_agent-IlKzk57uxO
+      agent_arn: arn:aws:bedrock-agentcore:us-east-1:479047237979:runtime/restaurant_agent-IlKzk57uxO
+      agent_session_id: 3a05041b-f1b8-4d5f-a86d-c8cd9fe6fd30
+    codebuild:
+      project_name: bedrock-agentcore-restaurant_agent-builder
+      execution_role: arn:aws:iam::479047237979:role/AmazonBedrockAgentCoreSDKCodeBuild-us-east-1-9949d4f62f
+      source_bucket: bedrock-agentcore-codebuild-sources-479047237979-us-east-1
+    authorizer_configuration: null
+    oauth_configuration: null
